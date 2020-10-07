@@ -1,0 +1,176 @@
+---
+title: "Practical Machine Learning Project"
+author: "Pablo Rueda"
+date: "10/6/2020"
+output: html_document
+---
+
+*Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.*
+
+*In this project I use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants, . They were asked to perform barbell lifts correctly and incorrectly in 5 different ways all stored in dependant variable called "classe". The main objective is to predict the manner in which they did the exercise based on any of the other variables generated in the experiment.*
+
+**All the data used in this project was kindly provided by: "Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements"**
+
+
+###GETTIN DATA AND LOADING THE NECESSARY PACKAGES:###
+
+```{r,message=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(caret)
+library(corrplot)
+library(RColorBrewer)
+
+training<-read.csv(file="pml-training.csv" )
+testing<-read.csv(file="pml-testing.csv" )
+```
+
+
+### EXPLORATORY DATA ANALYSIS AND CLEANING DATA ##
+
+In order to check the structure of the data , a basic exploratory analysis was carried out.
+Please note that some of the outputs are omitted in terms of space optimization of the present
+report.
+
+```{r,message=FALSE, warning=FALSE,results='hide',cache=TRUE}
+#data structure
+str(training)
+#Removing unncessary columns
+training<-training[,-c(2:7)]
+#outcome as factor variable
+training$classe<-as.factor(training$classe)
+# number of missing values per variable:
+map_dbl(training,.f= function(x){sum(is.na(x))})
+# number of blank spaces
+training %>% map_lgl(.f= function(x){any(!is.na(x) & x=='')})
+# blank space=NA
+training[training==""]<-NA
+```
+
+The next graph represent the number of NA values per variable in the training data set. Unfortunately, the 'x' labels are overlapped due to the big amount of predictors. Even though,
+it's possible to identify missing data (orange stripes) that will be deleted in the next steps.
+
+
+```{r,message=FALSE, warning=FALSE,cache=TRUE}
+training_long<-training %>% gather(key="variable", value='value',-X) %>% 
+        mutate(Missing_value = is.na(value))
+ggplot(data = training_long, aes(x = variable, y = X, fill = Missing_value)) +
+        geom_raster() +
+        scale_fill_manual(values = c("gray60", "orangered2")) +
+        theme_bw() +
+        labs(title = "Number of NA observations per variable") +
+        theme(legend.position = "bottom")
+```
+
+Columns with NA values are not representative for modelling. In most of the machine learning algorithms missing values represent a problem that could promote a lost in accuracy. Thus removing these values is totally necessary.
+
+```{r,message=FALSE, warning=FALSE, cache=TRUE}
+#selecting columns from training with no NAs:
+Nacol<-colnames(training)[colSums(is.na(training)) > 0]
+training<- training  %>% select(-Nacol)
+sum(is.na(training))
+```
+
+### PRE-PROCESSING PREDICTORS: ###
+
+**Predictors with near zero variance :**
+
+There's no predictor with varianze equal or approximate equal to zero than could lead into bias during bootsraping or cross-validation of these variables.
+
+```{r,cache=TRUE}
+predictors<-training %>% select(-c(X,classe))
+ZeroVar<-predictors %>% nearZeroVar(saveMetrics = TRUE)
+head(ZeroVar,5)
+```
+
+**Finding correlation between predictors:**
+
+In the next graph we see high correlated predictors, this will add redundant information to the model, thus PCA needs to be carry out.
+
+```{r, cache=TRUE}
+training_cor<-cor(predictors)
+corrplot(training_cor, type="upper", order="hclust",
+         col=brewer.pal(n=8, name="RdYlBu"))
+```
+
+### TRAINING A MODEL: ###
+
+**Model selected: Random Forest**
+
+The reason why I selected Random Forest algorithm is due that the outcome variable is indeed a classifier that is treated as a factor in response of the given predictors.Random Forest is type of bagging that improves the results by uncorrelating the decision trees generated in the process and avoiding overfitting, this algorithm  has the power to handle a large data set with higher dimensionality as this case.
+
+**TrainControl selected: cross-validation:**
+Cross-validation was used in order to improve the accuracy of the current model. I used 10 folds,as is general suggested, to balance the trade between bias and variance in the model.
+
+**PreProcessing options: center,scale,PCA**
+
+As mentioned before, a Principal Component Analysis (PCA) is needed due to high correlated predictors. For PCA process, is important to have normally distributed predictors in order to avoid outliers that will reduce the acurracy of the process. By using "center" and "scale" , we standarize each of the predictors, centering the data around its mean and simetrically distribut them around its standard deviation, this mean the data will have a gaussian shape required for a successful PCA process.
+
+```{r,cache=TRUE,warning=FALSE, cache=TRUE}
+training<-training %>% select(-X) 
+set.seed(123)
+model1<-train(classe~.,data=training,method='rf',preProcess=c('center','scale','pca'),
+              trControl=trainControl(method = 'cv',number=10))
+model1$finalModel
+```
+
+The number of random predictors selected for each tree that maximizes the accuracy is 2.
+
+```{r}
+plot(model1,uniform=TRUE, main="Accuracy vs random number of predictors")
+
+```
+
+
+**The out of bag error estimate is 1.65 which means the acurracy over the training data set is around 98.35% , this means our model is really accurate regarding the training data. By the cross-validation carried out and the machine learning algorithm used, at this point,I bet the out of sample error will be slightly smaller than 98.35%.** 
+
+### PREPARING TESTING DATA SET: ###
+
+In order to use my model to predict over the testing data set, the same process of data preparation, as in training data set, must be carry out. 
+
+```{r,message=FALSE, warning=FALSE,results='hide',cache=TRUE}
+
+
+#Removing unncessary columns
+testing<-testing[,-c(2:7)]
+
+# number of missing values per variable:
+map_dbl(testing,.f= function(x){sum(is.na(x))})
+# number of blank spaces
+testing %>% map_lgl(.f= function(x){any(!is.na(x) & x=='')})
+# blank space=NA
+testing[testing==""]<-NA
+```
+
+
+Again, we see the same columns, as in the training data set, that have NA values. These values will be removed.
+
+```{r,message=FALSE, warning=FALSE,cache=TRUE}
+testing_long<-testing %>% gather(key="variable", value='value',-X) %>% 
+        mutate(Missing_value = is.na(value))
+ggplot(data = testing_long, aes(x = variable, y = X, fill = Missing_value)) +
+        geom_raster() +
+        scale_fill_manual(values = c("gray60", "orangered2")) +
+        theme_bw() +
+        labs(title = "Number of NA observations per variable") +
+        theme(legend.position = "bottom")
+```
+
+```{r,message=FALSE, warning=FALSE, cache=TRUE}
+#selecting columns from training with no NAs:
+Nacoltest<-colnames(testing)[colSums(is.na(testing)) > 0]
+testing<- testing  %>% select(-Nacoltest)
+sum(is.na(testing))
+```
+
+### VALIDATING RESULTS: ###
+
+```{r, cache=TRUE}
+testing<- testing %>% select(-c(X,problem_id))
+testing$classepred<-predict(model1,testing)
+testing$classreal<-as.factor(c('B','A','B','A','A','E','D','B','A','A','B','C','B','A','E','E','A','B','B','B'))
+confusionMatrix(testing$classreal,testing$classepred)
+```
+
+**Conclussion:**
+The poposed model is able to predict the classifiers over the test data set with a 95% of accuracy,thus we can say is a very precise model. Even though is good for this purpose, the fact of being a time consuming process makes this model unefficient for scalable purposes. 
